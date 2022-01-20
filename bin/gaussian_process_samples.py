@@ -14,7 +14,7 @@ def default_float():
     return "float64"
 
 
-class Hey:
+class State:
 
     def __init__(self, kernel, x_grid, xa, xb_tracker, ci=.95):
         self.kernel = kernel
@@ -60,11 +60,11 @@ class Hey:
 
 class SampleTrajectory:
 
-    def __init__(self, hey, theta_tracker, random_state):
-        m = len(hey.x_grid)
+    def __init__(self, state, theta_tracker, random_state):
+        m = len(state.x_grid)
         self.u = random_state.randn(m+2)
         self.v = random_state.randn(m+2)
-        self.hey = hey
+        self.state = state
         self.theta_tracker = theta_tracker
 
     def __call__(self, theta):
@@ -78,13 +78,13 @@ class SampleTrajectory:
         t_normed = np.true_divide(t, t_norm)
 
         eps = v_norm * (v_normed * np.cos(theta) + t_normed * np.sin(theta))
-        return self.hey.scale().matmul(tf.expand_dims(eps, axis=-1)).numpy()
+        return self.state.scale().matmul(tf.expand_dims(eps, axis=-1)).numpy()
 
     def make_updater(self, ax, color, make_line_graph_fn):
         def updater(m):
             foo = self(self.theta_tracker.get_value())
             y_values = foo[:-2]
-            return m.become(make_line_graph_fn(ax, self.hey.x_grid, y_values, color))
+            return m.become(make_line_graph_fn(ax, self.state.x_grid, y_values, color))
         return updater
 
     def dot_updater(self, ax):
@@ -97,7 +97,7 @@ class SampleTrajectory:
     def make_xa_updater(self, ax):
         def updater(m):
             foo = self(self.theta_tracker.get_value())
-            x = self.hey.xa
+            x = self.state.xa
             y = foo[-2]
             return m.move_to(ax.coords_to_point(x, y))
         return updater
@@ -105,7 +105,7 @@ class SampleTrajectory:
     def make_xb_updater(self, ax):
         def updater(m):
             foo = self(self.theta_tracker.get_value())
-            x = self.hey.xb_tracker.get_value()
+            x = self.state.xb_tracker.get_value()
             y = foo[-1]
             return m.move_to(ax.coords_to_point(x, y))
         return updater
@@ -132,7 +132,7 @@ class GaussianProcessSamples(Scene):
                                   line_color=color,
                                   # vertex_dot_style=dict(fill_color=color,
                                   #                       fill_opacity=0.8),
-                                  stroke_opacity=0.8)
+                                  stroke_opacity=0.9)
 
     def construct(self):
 
@@ -154,7 +154,7 @@ class GaussianProcessSamples(Scene):
 
         # X_foo = random_state.uniform(low=x_min, high=x_max, size=(n_foo, 1))
         xa = 0.7
-        xb = 0.5
+        xb = xa - 0.2
         # x2 = random_state.uniform(low=x_min, high=x_max)
 
         # kernel_cls = kernels.MaternFiveHalves
@@ -194,16 +194,16 @@ class GaussianProcessSamples(Scene):
         length_scale_tracker = ValueTracker(length_scale)
         theta_tracker = ValueTracker(theta)
 
-        hey = Hey(kernel, X_grid, xa, xb_tracker)
+        state = State(kernel, X_grid, xa, xb_tracker)
 
-        curve = hey.plot_ellipse(ax2)
-        curve.add_updater(lambda m: m.become(hey.plot_ellipse(ax2)))
+        curve = state.plot_ellipse(ax2)
+        curve.add_updater(lambda m: m.become(state.plot_ellipse(ax2)))
 
         graphs = VGroup()
         lines = VGroup()
         dots = VGroup()
         for i, color in enumerate(colors):
-            traj = SampleTrajectory(hey, theta_tracker, random_state)
+            traj = SampleTrajectory(state, theta_tracker, random_state)
 
             foo = traj(theta_tracker.get_value())
             *y_values, ya, yb = foo
@@ -214,17 +214,17 @@ class GaussianProcessSamples(Scene):
             graphs.add(graph)
 
             dot_xa = Dot(ax1.coords_to_point(xa, ya),
-                         fill_color=color, fill_opacity=0.8, stroke_width=1.5) \
+                         fill_color=color, fill_opacity=0.9, stroke_width=1.5) \
                 .set_z_index(i+1)
             dot_xa.add_updater(traj.make_xa_updater(ax1))
 
             dot_xb = Dot(ax1.coords_to_point(xb_tracker.get_value(), yb),
-                         fill_color=color, fill_opacity=0.8, stroke_width=1.5) \
+                         fill_color=color, fill_opacity=0.9, stroke_width=1.5) \
                 .set_z_index(i+1)
             dot_xb.add_updater(traj.make_xb_updater(ax1))
 
             dot = Dot(ax2.coords_to_point(ya, yb),
-                      fill_color=color, fill_opacity=0.8, stroke_width=1.5) \
+                      fill_color=color, stroke_width=1.5) \
                 .set_z_index(curve.z_index+i+1)
             dot.add_updater(traj.dot_updater(ax2))
 
@@ -234,55 +234,47 @@ class GaussianProcessSamples(Scene):
             dots.add(dot, dot_xa, dot_xb)
             lines.add(line)
 
-        # l1 = ax1.get_vertical_line(ax1.coords_to_point(x1, .5 * y_min)) 
-        # l2 = ax1.get_vertical_line(ax1.coords_to_point(x2, .5 * y_min))
+        line_a = ax1.get_vertical_line(ax1.coords_to_point(xa, .75 * y_min)) 
+        line_b = ax1.get_vertical_line(ax1.coords_to_point(xb_tracker.get_value(), .75 * y_max))
+        line_b.add_updater(lambda m: m.become(ax1.get_vertical_line(ax1.coords_to_point(xb_tracker.get_value(), .75 * y_max))))
+        lines.add(line_a, line_b)
 
-        label_a = MathTex("x_1").move_to(ax1.coords_to_point(xa, y_min))
-        label_b = MathTex("x_2").next_to(ax1.coords_to_point(xb_tracker.get_value(), y_min), DOWN)
-        label_b.add_updater(lambda m: m.next_to(ax1.coords_to_point(xb_tracker.get_value(), y_min), DOWN))
+        label_a = MathTex("x_1").next_to(line_a, DOWN)
+        label_b = MathTex("x_2").next_to(line_b, UP)
+        label_b.add_updater(lambda m: m.next_to(line_b, UP))
         labels.add(label_a, label_b)
 
-        print("LABEL_A", ax1.point_to_coords(label_a.get_center()))
-
-        logo = Text("@louistiao", font="Open Sans", font_size=20, color=BLUE_E).to_corner(DR)
+        logo = Text("@louistiao", font="Open Sans", font_size=20, color=BLUE_D).to_corner(DR)
 
         self.add(logo, axes, labels, graphs, dots, curve, lines)
 
-        for _ in range(3):
-            self.play(theta_tracker.animate.increment_value(TAU),
-                      rate_func=rate_functions.linear, 
-                      run_time=2.)
+        rotations = 1
+        frequency = 1
+
+        self.play(xb_tracker.animate.set_value(xa - 0.45))
+        self.wait()
+        self.animate_samples(theta_tracker, rotations, frequency)
         self.wait()
 
-        self.play(xb_tracker.animate.increment_value(-.3))
+        self.next_section()
+        self.play(xb_tracker.animate.set_value(xa + 0.2))
         self.wait()
-        for _ in range(3):
-            self.play(theta_tracker.animate.increment_value(TAU),
-                      rate_func=rate_functions.linear, 
-                      run_time=2.)
+        self.animate_samples(theta_tracker, rotations, frequency)
         self.wait()
 
-        self.play(xb_tracker.animate.increment_value(.7))
-        self.wait()
-        for _ in range(3):
-            self.play(theta_tracker.animate.increment_value(TAU),
-                      rate_func=rate_functions.linear, 
-                      run_time=2.)
-        self.wait()
+        # self.next_section()
+        # self.play(xb_tracker.animate.set_value(xa + .015))
+        # self.wait()
+        # self.animate_samples(theta_tracker, rotations, frequency)
+        # self.wait()
 
-        self.play(xb_tracker.animate.set_value(xa + .015))
-        self.wait()
-        for _ in range(3):
-            self.play(theta_tracker.animate.increment_value(TAU),
-                      rate_func=rate_functions.linear, 
-                      run_time=2.)
-        self.wait()
+        # self.next_section()
+        # self.play(xb_tracker.animate.set_value(xb))
+        # self.wait()
+        # self.animate_samples(theta_tracker, rotations, frequency)
+        # self.wait()
 
-        self.play(xb_tracker.animate.set_value(xb))
-        self.wait()
-
-        # for _ in range(3):
-        #     self.play(theta_tracker.animate.increment_value(TAU),
-        #               rate_func=rate_functions.linear, 
-        #               run_time=2.)
-        # self.play(xb_tracker.animate.increment_value(-0.2))
+    def animate_samples(self, tracker, rotations, frequency,
+                        rate_func=rate_functions.linear):
+        self.play(tracker.animate.increment_value(rotations * TAU),
+                  rate_func=rate_func, run_time=rotations / frequency)
